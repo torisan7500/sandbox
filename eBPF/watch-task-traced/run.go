@@ -106,35 +106,30 @@ func behaveParent() {
 	panicIf(err, "cmd.Start")
 	defer func() {
 		cmd.Process.Kill()
-		cmd.Wait() // Goランタイム向け
+		cmd.Wait()
 	}()
 
 	// 子がちゃんと立ち上がってsleepに入るように
 	time.Sleep(300 * time.Millisecond)
-	childPid := cmd.Process.Pid
 
-	// 子PIDをkey=1にセット
-	// PtraceAttach後にsched_switchが発火し、子のeventがring bufferに書かれる
+	childPid := cmd.Process.Pid
 	err = hdl.objs.TargetPid.Put(uint32(1), uint32(childPid))
 	panicIf(err, "Put pid (child)")
 
 	// ptrace(PTRACE_ATTACH, ...)
 	err = syscall.PtraceAttach(childPid)
 	panicIf(err, "PtraceAttach")
-
-	var ws syscall.WaitStatus
-	_, err = syscall.Wait4(childPid, &ws, 0, nil)
+	_, err = syscall.Wait4(childPid, nil, 0, nil) // 簡略化。SIGSTOPのはず
 	panicIf(err, "Wait4")
-	fmt.Println("\nSuccessfully PtraceAttache")
+	fmt.Println("\nSuccessfully PtraceAttached")
 
+	// 出力。ptraceで__TASK_TRACEDが立ち、
+	// その後sched_switchで書き込まれてるはず。
 	fmt.Println("\n=== eBPF observation <Child> ===")
 	err = printRingBuff(cReader, "child ")
 	panicIf(err, "PrintRingBuff (child)")
 
-	// detachして子を解放
-	if err := syscall.PtraceDetach(childPid); err != nil {
-		fmt.Println("PtraceDetach:", err)
-	}
+	syscall.PtraceDetach(childPid)
 }
 
 func panicIf(err error, label string) {
